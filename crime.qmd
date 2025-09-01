@@ -1,0 +1,231 @@
+---
+title: "NYC Street Crime & Betweenness Centrality"
+author: "Edison Choque"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    theme: cosmo
+execute:
+  cache: true
+  warning: false
+  message: false
+  cache.lazy: false
+---
+
+## Introduction
+
+The analysis of criminal complexity through the lens of urban structure presents significant challenges for public policy. This is particularly relevant as many cities are rethinking how urban streets influence neighborhood prosperity, safety, and sustainability. Families and businesses increasingly seek safer places to live and establish their enterprises. Both actors aim to maximize their well-being and require relevant information to locate themselves in the best possible area, subject to budget constraints as well as perceptions of other factors such as safety. In this sense, new evidence on this topic is not only valuable for policymakers but also for pedestrians and business owners.  
+
+Urban infrastructures play a key role in shaping urban outcomes, including crime patterns. This perspective provides a better understanding of emerging forms of criminality and their spatial distribution. Streets are central actors in determining city dynamics and, in particular, criminal activity. Consider a city with two neighborhoods: (a) and (b). Neighborhood (a) has a grid street network, whereas (b) has an irregular infrastructure. These neighborhoods are likely to differ in their urban outcomes, especially in terms of criminal activity. Offenders tend to prefer less monitored streets that facilitate escape, often found in irregular street networks. Shorter streets and intersections with angles smaller than 90 degrees reduce visibility, which affects community intervention during incidents and decreases the likelihood of apprehension. Consequently, neighborhood (a) is likely to exhibit lower crime rates than (b). This example underscores the relevance of street networks within urban neighborhoods, not only for examining crime statistics in a specific geographic area but also for identifying their interconnection with green spaces and urban structures with varying degrees of visibility and connectivity. These findings will support the planning of public spaces and enhance community coexistence and prosperity.  
+
+This on going project tries to look for any interesting association between crime and urban structure. This research project will analyze the components of visibility and connectivity in New York City's street network to study crime patterns classified as street violence.  \\
+
+\textbf{Research Question:} \\
+
+To what extent do the visibility and connectivity of the street network contribute to variations in crime rates both within and across neighborhoods? \\
+
+
+```{r setup}
+#| include: false
+library(sf)
+library(tidyverse)
+library(lubridate)
+library(sfnetworks)
+library(tidygraph)
+library(mapview)
+library(here)
+library(dplyr)
+library(haven)
+library(viridis)
+library(readr)
+```
+
+
+```{r paths}
+#| include: false
+ROOT       <- here("G:/My Drive/UAH 2024/Crime_NYC")
+DATA_DIR   <- file.path(ROOT, "Data")
+CRIME_FILE <- file.path(DATA_DIR, "in/Crime_Reports_nyc.dta")
+SEG_FILE   <- file.path(DATA_DIR, "gis/DCM_Manhattan/lion_manhatan.dbf")
+OUT_DIR    <- file.path(DATA_DIR, "output")
+PLOT <- file.path(ROOT, "PLOTS" )
+```
+
+
+```{r} 
+#| include: false
+df_seg <- read.csv(paste0(OUT_DIR, "/df_seg.csv"))
+
+crime_df <- read_dta(CRIME_FILE) %>%
+  filter(!is.na(Latitude), !is.na(Longitude), Place_Crime_Detail == "STREET") %>%
+  select(Latitude,Longitude,Crime_Group ,Crime_Category,Law_Category,
+        LOC_OF_OCCUR_DESC,start_time_crime,end_time_crime,duration_crime,ADDR_PCT_CD,
+        SUSP_AGE_GROUP,SUSP_RACE,VIC_RACE,VIC_SEX,occurrence_date,occurrence_time,CMPLNT_FR_DT
+  ) |> 
+  mutate(
+    occ_date = as.Date(occurrence_date, origin = "1960-01-01"),
+    month    = floor_date(occ_date, "month"),
+    occ_dt   = as.POSIXct(occurrence_time / 1000,
+                          origin = "1960-01-01", tz = "America/New_York") )
+```
+
+## Data
+
+In this section, the principal variable description is presented in order to emphasize any patterns that may be of interest. This exploratory approach constitutes a preliminary investigation into the research question. Also, this quarto project has the aim to show reproducible results. 
+
+First, we work with a short data base to make it easer to handle. So, we import crime data for Manhhatan for 2018. Also, we restringe this data to all the crimes that happened on the street. 
+
+Segments are the street layer from Manhhatan and it is created by NYC open data. To create a betweenness crentrality indicator, we transform the lenght unit to meters. 
+
+To create the betweenness centrality, we create a network with unique direction street. This important because some aveniues has both direct and reversal traffic directions. 
+
+Once we have the betweennes centrality indicador for each segment, we merge both crime data with segments. 
+
+## Description 
+
+In this section, we are goint to reponde specific questions about the merged data. 
+If any question can´t be answered becesause of data, we will create further sections to solve them.  
+
+### what is the evolution of crimes categories and groups? 
+
+```{r}
+# Total crime Category counts per year time series plot
+over_time = crime_df %>% group_by(month, Crime_Category) %>% summarise(count = n())
+over_time <- over_time %>%
+  filter(!is.na(Crime_Category), str_trim(Crime_Category) != "")
+
+ggplot(over_time, aes(month, log(1+count), col=Crime_Category)) +
+  geom_line() +
+  facet_wrap(~Crime_Category, scales = "free", nrow=4) + 
+  theme_bw() +
+  theme(legend.position = "none", strip.background = element_rect(fill="white")) +
+  scale_color_viridis_d(end = 0.85) +
+  xlab("") +
+  ylab("ln(1 + Counts)")
+
+ggsave(file.path(PLOT, "monthly_counts_CrimeCategory.pdf"), width = 13, height = 7, device = "pdf")
+
+
+# Total crime Group counts per year time series plot
+over_time = crime_df %>% group_by(month, Crime_Group) %>% summarise(count = n())
+over_time <- over_time %>%
+  filter(!is.na(Crime_Group), str_trim(Crime_Group) != "")
+
+ggplot(over_time, aes(month, log(1+count), col=Crime_Group)) +
+  geom_line() +
+  facet_wrap(~Crime_Group, scales = "free", nrow=3) + 
+  theme_bw() +
+  theme(legend.position = "none", strip.background = element_rect(fill="white")) +
+  scale_color_viridis_d(end = 0.85) +
+  xlab("") +
+  ylab("ln(1 + Counts)")
+
+ggsave(file.path(PLOT, "monthly_counts_CrimeGroup.pdf"), width = 13, height = 7, device = "pdf")
+```
+
+### What is the correlation between betweenness cretrality and crime
+
+In the following graph, we can see the map comparing both types of betweenness cretrality measure. *this is a prove*
+
+```{r plots}
+ggplot(df_seg, aes(log1p(bw_w), n_crimes)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "gam") +
+  labs(x = "Log length-weighted betweenness", y = "Number of crimes")
+
+ggsave(file.path(PLOT, "bw_vs_crime.pdf"), width = 6, height = 4, device = "pdf")
+
+ggplot(df_seg, aes(log1p(bw_uw), n_crimes)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "gam") +
+  labs(x = "Log length-weighted betweenness", y = "Number of crimes")
+
+ggsave(file.path(PLOT, "bw_uw_vs_crime.pdf"), width = 6, height = 4, device = "pdf")
+```
+
+```{r map, eval=FALSE}
+#| include: false
+#mapview(df_seg, zcol = "bw_w") +
+#mapview(crime_matched, col.regions = "red", alpha = 0.5)
+```
+
+The correlation coeficiente is small around 7% 
+```{r}
+# Calculate correlation coefficient
+cor.test(
+  log1p(df_seg$bw_w), 
+  df_seg$n_crimes, 
+  method = "spearman"
+)
+```
+
+### which percentage of the street segments account for 75% of the crimes? 
+
+```{r}
+# ------------------------------------------------------------------
+# Pareto curve **excluding** zero-crime segments
+# ------------------------------------------------------------------
+crime_pareto <- df_seg %>%
+  st_drop_geometry() %>%
+  filter(n_crimes > 0) %>%                         # drop zeros only here
+  distinct(SegmentID, n_crimes) %>%
+  arrange(desc(n_crimes)) %>%
+  mutate(
+    cum_crime       = cumsum(n_crimes),
+    cum_pct_crime   = cum_crime / sum(n_crimes),
+    node_rank       = row_number(),
+    cum_pct_nodes   = node_rank / n()
+  )
+
+pct_nodes_75 <- round(
+  nrow(filter(crime_pareto, cum_pct_crime <= 0.75)) /
+  n_distinct(filter(df_seg, n_crimes > 0)$SegmentID) * 100,
+  1
+)
+
+ggplot(crime_pareto, aes(x = cum_pct_nodes, y = cum_pct_crime)) +
+  geom_line(size = 1.2, colour = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_hline(yintercept = 0.75, linetype = "dotted", colour = "red") +
+  labs(
+    title = "Cumulative Distribution of Crimes by Segments (non-zero only)",
+    subtitle = paste0("Top ", pct_nodes_75, "% of active segments account for 75 % of crimes"),
+    x = "Cumulative % of segments (with ≥ 1 crime)",
+    y = "Cumulative % of crimes"
+  ) +
+  theme_minimal()
+
+ggsave(file.path(PLOT, "pareto_nonzero.pdf"),
+        width = 7, height = 5, device = "pdf")
+```
+
+As you can see in the next figure there is lot values of cero crime in this sample. 
+```{r}
+ggplot(df_seg, aes(n_crimes)) +
+  geom_histogram(binwidth = 1, fill = "steelblue") +
+  labs(title = "Distribution of crimes per street segment")
+
+ggsave(file.path(PLOT, "hist_crime_segments.pdf"), width = 6, height = 4, device = "pdf")
+```
+
+### what is the correlation between between centrality and crime categories? 
+
+```{r}
+corr_tbl <- df_seg %>%
+  st_drop_geometry() %>%
+  select(bw_w, starts_with("n_crimes_")) %>%
+  corrr::correlate(method = "spearman") %>%
+  filter(term == "bw_w") %>%          # keep only row for bw_w
+  select(-term) %>%                   # drop redundant row name
+  pivot_longer(everything(), names_to = "Crime_Category", values_to = "rho") %>%
+  mutate(
+    Crime_Category = str_remove(Crime_Category, "^n_crimes_")  # drop prefix
+  ) %>%
+  arrange(desc(abs(rho)))
+
+# Nice printed table
+corr_tbl %>% print(n = Inf)
+```
