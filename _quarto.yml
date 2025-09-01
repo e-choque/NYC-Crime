@@ -1,0 +1,27 @@
+project:
+  type: default         # Single document/project
+  title: "Crime in New York City"
+
+author: "Edison Choque-Sanchez"
+description: "A reproducible analysis of crime patterns and trends in NYC."
+
+format:
+  html:
+    theme: cosmo        # Choose a theme: cosmo, flatly, litera, etc.
+    toc: true           # Show table of contents
+    toc-depth: 3
+    code-fold: true     # Collapsible code blocks
+    number-sections: true
+    embed-resources: true  # Embed CSS/images for a self-contained HTML
+
+execute:
+  echo: false           # Hide code by default
+  warning: false
+  message: false
+
+bibliography: references.bib
+csl: apa.csl
+freeze: auto            # Re-render only if the source changes
+resources:
+  - data/
+  - images/
